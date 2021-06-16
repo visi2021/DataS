@@ -1,0 +1,178 @@
+---
+title: "NY Shooting Incident Analysis Report"
+author: "Anonymous"
+date: "6/2/2021"
+output:
+  html_document: default
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(stringr)
+library(readr)
+library(tidyverse)
+library(lubridate)
+```
+#### Source of the Data 
+
+Import the content of the NYPD shooting incident report from the catalog location at 
+<https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic>. 
+
+It's a comma separated value file that is also available for download      
+
+#### Description of the Data 
+
+This is a breakdown of every shooting incident that occurred in NYC going back to 2006 through the end of the previous calendar year. This data is manually extracted every quarter and reviewed by the Office of Management Analysis and Planning before being posted on the NYPD website. Each record represents a shooting incident in NYC and includes information about the event, the location and time of occurrence. In addition, information related to suspect and victim demographics is also included. This data can be used by the public to explore the nature of shooting/criminal activity. 
+
+#### Focus of the Analysis or Questions of Interest  
+
+1.  Have the number of shooting incidents increased or decreased over the years?
+2.  How many of those shooting incidents resulted in death? 
+3.  Is one location or a borough safer than the other?
+4.  Is the number of deaths proportional to the number of shooting incidents?
+5.  Can we predict the future deaths based on just the number of shooting incidents?
+6.  Are their additional socio-economic factors in the data that can be considered to make a more        accurate prediction?  
+
+```{r import_data, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+nypd_inc_report <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+```{r tidy_nyinc_data, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Remove the columns that are not required for the analysis  
+nyc_data <- nypd_inc_report %>%
+  mutate(INC_DATE = mdy(OCCUR_DATE)) %>%
+  select(c(BORO:VIC_RACE, INC_DATE))
+
+# Convert the incident date into year format so that it can be used in the count the incidents for every year
+nyc_data_date <- nyc_data %>%
+  mutate(INC_YEAR = year(as.Date(nyc_data$INC_DATE, format = "%m/%d/%Y")))
+
+# Count the total number of incidents for each year and by each borough 
+nyc_inc_boro_c <- nyc_data_date %>%
+  count(INC_YEAR, BORO, sort = TRUE, name = "INC_COUNT") %>%
+  rename(BOROUGH = 'BORO')
+
+# Arrange the resulting table in ascending order of year 
+nyc_year_asc <- nyc_inc_boro_c[with(nyc_inc_boro_c, order(INC_YEAR)),]
+
+# Compute the total number of deaths for each year grouped by borough
+# STATISTICAL_MURDER_FLAG is a logical column, TRUE indicates the incidents resulted in a death 
+nyc_death_boro_c <- nyc_data_date %>%
+  group_by(INC_YEAR, BORO)  %>%
+  summarize(DEATHS = sum(STATISTICAL_MURDER_FLAG == "TRUE")) %>%
+  rename(BOROUGH = 'BORO')
+
+# Join the incident count and death table so that all the required data for plotting is available in one table 
+nyc_boro_inc_death <- nyc_year_asc %>%
+  full_join(nyc_death_boro_c)
+
+# Compute the total incidents by each borough for every year
+nyc_tot_boro_c <- nyc_year_asc %>%
+  group_by(BOROUGH) %>%
+  summarize(TOT_COUNT = sum(INC_COUNT))
+
+# Compute the total deaths by each borough for every year
+nyc_tot_boro_d <- nyc_boro_inc_death %>%
+  group_by(BOROUGH)  %>%
+  summarize(TOT_DEATHS = sum(DEATHS))
+
+# Join the total incident count and total death count table 
+nyc_boro_tot <- nyc_tot_boro_c %>%
+  full_join(nyc_tot_boro_d)
+
+# Compute the total number of deaths and incidents in New York for every year 
+nyc_tot_death_inc <- nyc_boro_inc_death %>%
+  group_by(INC_YEAR) %>%
+  summarize(TOTAL_INCIDENT = sum(INC_COUNT), TOTAL_DEATHS = sum(DEATHS))
+```
+##### The following Bar chart is a visual of the historical data for the number of shooting incidents by borough    
+
+Chart 1. 
+```{r plot_incidents, echo=TRUE}
+nyc_boro_inc_death %>%
+   ggplot(aes(x=INC_YEAR, y=INC_COUNT, fill=BOROUGH)) +
+   geom_bar(stat="identity", position = "dodge") + theme_bw() + 
+   scale_x_continuous(n.breaks=10) +
+   labs(title = "Shooting Incidents in NY city by Borough", y = NULL) + 
+   xlab('Incident Year') + ylab('Incident Count') 
+```
+
+The Bar chart shows that the number of shooting incidents in the borough of Brooklyn is the highest and it is the lowest in borough of Brooklyn. The number of the shooting incidents across all the boroughs decreased from year 2006 to 2019. As observed in the chart, the year 2020 does not follow the pattern of decreasing incidents, in fact the number of incidents have almost doubled compared to 2019. The city of Newyork was hit hardest by the COVID19 pandemic, so their must be various socio-economic factors that might have resulted in a spike in the number of incidents. That data is not available on this source report to be considered for further analysis. 
+
+##### The following Bar chart is a visual of the historical data for the total number of shooting incidents by borough from year 2006 to 2020     
+
+Chart 1.1
+```{r plot_incidents_total, echo=TRUE}
+nyc_boro_tot %>%
+   ggplot() +
+   geom_bar(aes(x=BOROUGH, y=TOT_COUNT, fill=BOROUGH),stat="identity", position = "dodge") + 
+   theme_bw() + labs(title = "Total Shooting Incidents in NY City", y = NULL) + 
+   xlab('Borough') + ylab('Total Incidents')
+```
+
+Chart 1.1 supplements the info provided in chart 1.  
+The total population of each boroughs as of year 2020 is as listed below  
+
+```{r add_population, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+nyc_add_pop <- nyc_boro_tot %>%
+  mutate(POPULATION = c("1,420,277", "2,628,211", "1,729,530", "2,396,949", "517,597"))
+knitr::kable(nyc_add_pop, format="pipe", align="l")
+```
+
+Comparing the population and proportion of shooting incidents, one interesting observation is that the population of Bronx is  approximately one-third of Queens, however the total number of shooting incidents is approximately double that of Queens. Based on the incidents and population, the proportion of shooting incidents in Bronx is higher than that of other boroughs and it would be considered an unsafe borough. Next couple of Bar charts will visually represent the number of shooting incidents that resulted in deaths. 
+
+##### Bar chart that represents historical count of shooting incidents that resulted in death. 
+
+Chart 1.2 
+```{r plot_deaths, echo=TRUE}
+nyc_boro_inc_death %>%
+   ggplot(aes(x=INC_YEAR, y=DEATHS, fill=BOROUGH)) +
+   geom_bar(stat="identity", position = "dodge") + theme_bw() + 
+   scale_x_continuous(n.breaks=10) +
+   labs(title = "Shooting Deaths in NY city by Borough", y = NULL) + 
+   xlab('Incident Year') + ylab('Death Count') 
+```
+
+Comparing chart 1 with chart 1.2, it is observed that the number of deaths by borough is approximately proportional to the number of shooting incidents by borough from year 2006 to 2020. 
+
+##### Bar chart that represents total count of shooting incidents that resulted in death arranged by each borough. 
+
+Chart 1.3 
+```{r plot_total_deaths, echo=TRUE}
+nyc_boro_tot %>%
+   ggplot() +
+   geom_bar(aes(x=BOROUGH, y=TOT_DEATHS, fill=BOROUGH),stat="identity", position = "dodge") + 
+   theme_bw() + labs(title = "Total Shooting Deaths in NY City", y = NULL) + 
+   xlab('Borough') + ylab('Total Deaths')
+```
+
+Comparing chart 1.1 with chart 1.3, it is observed that the total number of deaths by borough is approximately proportional to the total number of shooting incidents by borough. 
+
+Based on the data presented through the visualization, a pattern seem to exist between the number of shooting incidents and the number of deaths. The chart below represents the actual vs predictions  for the number of deaths plotted against the number of shooting incidents. 
+
+Chart 2
+```{r plot_model, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+nyc_tot_death_inc %>%
+  ggplot(aes(x=TOTAL_INCIDENT, y=TOTAL_DEATHS), color="black") + theme_bw() +
+  geom_point() +
+  geom_smooth(method=lm) +
+  labs(title = "Model Actual vs Predictions by year", y = NULL) + 
+   xlab('Incident count') + ylab('Death Count') 
+```
+
++   The X-axis is the actual number of shooting incidents aggregated per year 
++   The Y-axis is the actual number of shooting deaths aggregated per year 
++   The dots on the scatter plot represent the intersection of actual death count against incident count
++   The blue line represents the predictions for death count against incident count 
+
+#### Conclusion and Bias Identification
+As it can be observed from the plot, our prediction model fits closely with the actual numbers.
+The model predicts that the number of deaths increased as the number of the shooting incidents increased. The number of dots that are further away from the blue line indicate that their must be  other demographic factors that may need to be considered to build a more accurate prediction model. 
+
+The source dataset provides demographic information such as age, gender and race of the perpetrator and victims of the shooting incident. The focus of my research was to highlight the increase or decrease in the number of shooting incidents, to find out if one location is safer than the other and finally to predict the number of future such incidents. As I set out on my research, my goal was to identify patterns and draw meaningful conclusion without using any of the available demographic information. I might consider this as a positive bias. 
+
+Interesting to note that if the year 2020 is not considered in the equation, the number of shooting incidents year over year shows an exponential decay i.e. the number of shooting incidents have decreased from year 2006 to 2019.      
+

@@ -1,0 +1,294 @@
+---
+title: "COVID19 Report"
+author: "Anonymous"
+date: "6/1/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+##### Step 1 - Import the libraries required by the project 
+```{r setup, include=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(stringr)
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(scales)
+```
+#### Source of the dataset 
+The data can be accessed at the following link 
+<https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/README.md>
+
+#### Description of the data 
+The data was pulled from a Github repository that is maintained by the center for Systems Science and Engineering(CSSE) at Johns Hopkins University. The data is a set of comma separated value files. It contains data related to confirmed, recovered cases and deaths due to COVID19 pandemic. The records start from the month of January 2020 and are updated daily. The repository has separate datasets for US and global cases. I will be mainly using the US case dataset for my analysis.          
+
+#### Focus of my report or question of interest
++   Pattern for the number of cases and deaths in the state of US
++   Pattern for the number of cases and deaths in the state of New York
++   Finally build a prediction model based on those patterns observed
+
+##### Step 1.1 - store the pointer to the files 
+```{r get_jhu_data, warning=FALSE}
+# Get the current Data in the four files 
+# All four files begin with the same prefix 
+
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <-
+c("time_series_covid19_confirmed_global.csv",
+"time_series_covid19_deaths_global.csv",
+"time_series_covid19_confirmed_US.csv",
+"time_series_covid19_deaths_US.csv")
+urls <- str_c(url_in,file_names)
+```
+
+##### Step 1.2 - Read the files from source URL using the pointers to the four files 
+
+```{r import_data, message=FALSE, warning=FALSE, paged.print=FALSE}
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+##### Step 2 - Tidy the data 
+For the purpose of my analysis, I will need the cases, deaths, state, population to be extracted and available in a dataframe.
+
+```{r tidy_global_data, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Arrange the table such that each date column becomes value under the date column and cases become  value under the case column.    
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key), 
+              names_to = "date", 
+              values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+#Repeat the above to arrange the death table  
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population), 
+              names_to = "date", 
+              values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+#Join the cases and death tables
+US <- US_cases %>%
+  full_join(US_deaths)
+
+#Group the number of cases, deaths, population by each state 
+#create a separate column that will hold the values for death per million of the population
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>%
+  select(Province_State, Country_Region, date, 
+         cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+#Group the number of cases, deaths, population by each state 
+#create a separate column that will hold the values for death per million of the population
+US_totals <- US_by_state %>%
+  group_by(Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>%
+  select(Country_Region, date, 
+         cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+```
+
+##### Step 3 - Create visualizations and Analyze the data 
+
+```{r plot_US_totals, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#plot the total number of deaths against the total number of cases in US
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) + theme_bw() +
+  scale_x_date(date_breaks = "2 months") +
+  scale_y_log10(labels = comma) +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+```
+
+As observed from the graph above, the total number of cases and deaths started increasing around the month of March 2020 in US. From around end of April 2020 it is observed that the number of cases and deaths continued to remain proportional. 
+```{r plot_US_by_state, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#plot the total number of deaths against the total number of cases for the state of New York
+state <- "New York"
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) + theme_bw() +
+  scale_x_date(date_breaks = "2 months") +
+  scale_y_log10(labels = comma) +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in US ", state), y = NULL)
+```
+
+As observed from the graph, the total number of cases and deaths started increasing around the month of March in the state of New York. The trend in New York seems to be similar to the other states in US. The state of New York was probably the one of the worst impacted by the pandemic.
+
+```{r plot_new_cases, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Compute the new cases for each state and populate those values under a separate column
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))  
+#Compute the new cases for US and populate those values under a separate column
+US_totals <- US_totals  %>%
+    mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+#plot the total number of new deaths against total number of new cases in US
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) + theme_bw() +
+  scale_x_date(date_breaks = "2 months") +
+  scale_y_log10(labels = comma) +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+```
+
+The above graph provides an interesting insight, the number of new cases and deaths increased exponentially starting March 2020. That's the timeline during which the states across US starting going under lockdowns and imposing restrictions on social gathering. From the graph it can be seen that the country saw a second wave of surge in infections starting at the end of September 2020 until the end of January 2021.   
+
+```{r plot_new_cases_ny, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#plot the total number of new deaths against total number of new cases for New York 
+state <- "New York"
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) + theme_bw() +
+  scale_x_date(date_breaks = "2 months") +
+  scale_y_log10(labels = comma) +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in US ", state), y = NULL)
+```
+
+The above graph for the state of New York shows an interesting pattern, the state of New York saw a rapid increase in the number of new cases and deaths starting in month of March 2020 until the end of April 2020. The number of new cases and deaths started decreasing from the end of April 2020 until the middle of September 2020. As it can be observed, the state of New York saw a second wave of increase in the new cases and deaths that started steadily decreasing towards the end of April 2021.    
+
+##### Step 4 - Build a prediction model in order to conduct more analysis on the data
+
+As it was observed in our data analysis, the number of deaths was approximately proportional to the number to the number of cases across the US and that pattern was also observed in one of the states. Based on the relationship, I will use a simple linear regression model to predict the number of deaths and analyze the predictions against the actual data.    
+
+```{r build_data_model, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Compute the deaths per thousand and case per thousand by each state in US 
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            Population = max(Population),
+            cases_per_thou = 1000 * cases / Population,
+            deaths_per_thou = 1000 * deaths / Population)  %>%
+  filter(cases > 0, Population > 0)
+
+#Use a simple linear regression model, death per thousand is a function of cases per thousand  
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = US_state_totals)
+summary(mod)
+
+#pass the model object into the predict function, this will return the prediction for number of deaths per thousand   
+US_tot_w_pred <- US_state_totals %>% mutate(pred = predict(mod))
+
+#plot the actual vs predictions 
+US_tot_w_pred %>% 
+  ggplot() + 
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = "blue") +
+  geom_line(aes(x = cases_per_thou, y = pred), color = "red") + theme_bw() + 
+  labs(title = "Model Actual vs Predictions by count", y = NULL) + 
+  xlab('Cases per thousand') + ylab('Death per thousand') 
+
+```
+
+As observed from this scatter plot of the model, their exist a relationship between the death and cases, however most of the predictions for the deaths per thousand cases are clustered away from the regression line. For further analysis lets use the simple linear regression model to perform two more iterations of the prediction as follows 
+
++ Cases as the dependent and population as the independent variable 
++ Deaths as the dependent and Cases as the independent variable 
+
+```{r plot_cases, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+modp <- lm(cases ~ Population, (data = US_state_totals %>% filter(cases > 9000)))
+summary(modp)
+
+US_tot_w_predpop <- US_state_totals %>% filter(cases > 9000) %>% 
+  mutate(pred_cases = predict(modp), residual_c = resid(modp), perc_errc = (residual_c/cases)*100)
+
+US_tot_w_predpop %>% 
+  ggplot() + 
+  geom_point(aes(x = Population, y = cases), color = "blue") +
+  geom_line(aes(x = Population, y = pred_cases), color = "red") + theme_bw() +
+  scale_x_log10(labels = comma) +
+  scale_y_log10(labels = comma) +
+  labs(title = "Model Actual vs Predictions by count", y = NULL) + 
+  xlab('Population') + ylab('Cases') 
+```
+
+As it is observed from the scatter plot, the actual cases now form clusters closer to the regression line. Listed in the table are actual cases that have the most differences between the actuals and the prediction. Those are the ones that are plotted further away from the regression line. The P-value, adjusted R-squared values show that their exist a significant statistical relationship between the number of cases and the population. The last column shows the percentage difference between the actuals and the prediction. 
+
+```{r deviation_cases, echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+knitr::kable(US_tot_w_predpop %>% 
+               slice_min(perc_errc, n=10) %>% 
+               select(c(Province_State, cases, pred_cases, residual_c, perc_errc)))
+```
+
+```{r plot_deaths, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+modd <- lm(deaths ~ cases, (data = US_state_totals %>% filter(deaths > 200)))
+summary(modd)
+
+US_tot_w_predd <- US_state_totals %>% filter(deaths > 200) %>% 
+  mutate(pred_deaths = predict(modd), residual_d = resid(modd), perc_errd = (residual_d/deaths)*100)
+
+US_tot_w_predd %>% 
+  ggplot() + 
+  geom_point(aes(x = cases, y = deaths), color = "blue") +
+  geom_line(aes(x = cases, y = pred_deaths), color = "red") + theme_bw() + 
+  scale_x_log10(labels = comma) +
+  scale_y_log10(labels = comma) +
+  labs(title = "Model Actual vs Predictions by count", y = NULL) + 
+  xlab('cases') + ylab('deaths')
+```
+
+As it is observed from the scatter plot, the actual deaths now form cluster closer to the regression line. Listed in the table are actual deaths that have the most differences between the actuals and the prediction. Those are the ones that are plotted further away from the regression line. The P-value, adjusted R-squared values show that their exist a significant statistical relationship between the number of deaths and the cases.The last column shows the percentage difference between actuals and the prediction.   
+
+```{r deviation_deaths, echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+knitr::kable(US_tot_w_predd %>% 
+               slice_min(perc_errd, n=10) %>% 
+               select(c(Province_State, deaths, pred_deaths, residual_d, perc_errd)))
+```
+
+#### Conclusion and Bias Identification 
+
+Summary of the data analysis 
+
++   It was observed that cases significantly started increasing during the month of March 2020 throughout US 
++   A similar pattern was observed in the state of New York  
++   The number of new cases started decreasing around the month of February 2021 throughout US and similar pattern was observed in New York  
++   Vaccines were approved in December 2020 in US and was administered in phases, so that probably explains the reduction in the number of new cases  
+
+The accuracy of the analysis significantly depends on the reliability of source data. The data collection and reporting vary from one state to the other. As we observed, their was a sudden surge of cases during the initial stages of the pandemic and their were not enough resources for timely and accurate diagnoses of the positive cases. So some of the data reported during that initial phase might not have captured the actual number of cases or deaths.
+Please see the link <https://covidtracking.com/data/state/northern-mariana-islands/notes> for one of the data anomalies. The linear regression model predicted negative numbers for the deaths for this US territory. Similar was the case with Virgin Island and Guam. All the states took varying approach to handling the situation with some imposing strict restrictions whereas others being liberal. So recommendations based on my report may be perceived as biased towards one state or other based on the political affiliation of a person or group. 
+
+To conclude, the good news is that the number of new cases and deaths have been reducing significantly after the introduction of vaccines.
+
+```{r Info, echo=TRUE}
+sessionInfo()
+```
